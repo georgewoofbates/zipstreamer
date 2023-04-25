@@ -38,6 +38,7 @@ func main() {
 
     shutdownChannel := make(chan os.Signal, 10)
     go func() {
+		log.Printf("Running server")
         err := http.ListenAndServe(":http", certManager.HTTPHandler(nil))
         if err != nil && err != http.ErrServerClosed {
             log.Printf("Server Error: %s", err)
