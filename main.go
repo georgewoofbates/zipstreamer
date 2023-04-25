@@ -1,53 +1,62 @@
 package main
 
 import (
-	"context"
-	"log"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+    "crypto/tls"
+    "context"
+    "log"
+    "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
 
-	zip_streamer "github.com/scosman/zipstreamer/zip_streamer"
+    zip_streamer "github.com/scosman/zipstreamer/zip_streamer"
+
+    "golang.org/x/crypto/acme/autocert"
 )
 
 func main() {
-	zipServer := zip_streamer.NewServer()
-	zipServer.Compression = (os.Getenv("ZS_COMPRESSION") == "DEFLATE")
-	zipServer.ListfileUrlPrefix = os.Getenv("ZS_LISTFILE_URL_PREFIX")
+    zipServer := zip_streamer.NewServer()
+    zipServer.Compression = (os.Getenv("ZS_COMPRESSION") == "DEFLATE")
+    zipServer.ListfileUrlPrefix = os.Getenv("ZS_LISTFILE_URL_PREFIX")
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "4008"
-	}
+    certManager := autocert.Manager{
+        Prompt:     autocert.AcceptTOS,
+        HostPolicy: autocert.HostWhitelist("zip-streamer.cliped.io"), //Your domain here
+        Cache:      autocert.DirCache("certs"),            //Folder for storing certificates
+    }
 
-	httpServer := &http.Server{
-		Addr:        ":" + port,
-		Handler:     zipServer,
-		ReadTimeout: 10 * time.Second,
-	}
+    httpServer := &http.Server{
+        Addr: ":https",
+        TLSConfig: &tls.Config{
+            GetCertificate: certManager.GetCertificate,
+            MinVersion: tls.VersionTLS12, // improves cert reputation score at https://www.ssllabs.com/ssltest/
+        },
+        Handler:     zipServer,
+        ReadTimeout: 10 * time.Second,
+    }
 
-	shutdownChannel := make(chan os.Signal, 10)
-	go func() {
-		log.Printf("Server starting on port %s", port)
-		err := httpServer.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
-			log.Printf("Server Error: %s", err)
-		}
-		shutdownChannel <- syscall.SIGUSR1
-	}()
+    shutdownChannel := make(chan os.Signal, 10)
+    go func() {
+        err := http.ListenAndServe(":http", certManager.HTTPHandler(nil))
+        if err != nil && err != http.ErrServerClosed {
+            log.Printf("Server Error: %s", err)
+        }
+        shutdownChannel <- syscall.SIGUSR1
+    }()
 
-	// Listen for os signal for graceful shutdown
-	signal.Notify(shutdownChannel, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+    log.Fatal(httpServer.ListenAndServeTLS("", ""))
 
-	// Wait for shutdown signal, then shut down
-	shutdownSignal := <-shutdownChannel
-	log.Printf("Received signal (%s), shutting down...", shutdownSignal.String())
-	httpServer.Shutdown(context.Background())
+    // Listen for os signal for graceful shutdown
+    signal.Notify(shutdownChannel, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
-	// Exit was not expected, return non 0 exit code
-	if shutdownSignal == syscall.SIGUSR1 {
-		os.Exit(1)
-	}
+    // Wait for shutdown signal, then shut down
+    shutdownSignal := <-shutdownChannel
+    log.Printf("Received signal (%s), shutting down...", shutdownSignal.String())
+    httpServer.Shutdown(context.Background())
+
+    // Exit was not expected, return non 0 exit code
+    if shutdownSignal == syscall.SIGUSR1 {
+        os.Exit(1)
+    }
 }
