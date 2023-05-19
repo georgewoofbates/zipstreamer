@@ -22,7 +22,7 @@ func main() {
 
     certManager := autocert.Manager{
         Prompt:     autocert.AcceptTOS,
-        HostPolicy: autocert.HostWhitelist("zip-streamer.cliped.io"), //Your domain here
+        HostPolicy: autocert.HostWhitelist("zip.cliped.app"), //Your domain here
         Cache:      autocert.DirCache("certs"),            //Folder for storing certificates
     }
 
